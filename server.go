@@ -7,11 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,9 +89,9 @@ func serverMain(exe string, args []string) error {
 		return err
 	}
 
-	if *reg {
+	if runtime.GOOS == `windows` && *reg {
 		if tcpAddr.Port < 80 {
-			return fmt.Errorf("usage: %s -s ip:port -reg\n", exe)
+			return fmt.Errorf("usage: %s -s ip:port -reg", exe)
 		}
 		return createRegFile(exe, tcpAddr.String())
 	}
@@ -607,8 +609,8 @@ func (pb *progressBar) Read(p []byte) (n int, err error) {
 	return
 }
 func (pb *progressBar) Close() {
-	pb.b.Abort(false)
-	pb.b.EnableTriggerComplete()
+	pb.b.SetCurrent(math.MaxInt64) // 使进度达到100%
+	pb.b.EnableTriggerComplete()   // 确保处于完成状态
 }
 
 const (
@@ -747,21 +749,29 @@ func (fs *fileServer) post(w io.Writer, r *http.Request, buf []byte) error {
 			return err
 		}
 	default:
-		if !strings.HasPrefix(ht, "multipart/form-data;") {
-			return &webErr{
-				code: http.StatusForbidden,
-				msg:  fmt.Sprintf("%s:%s not support", headerType, ht),
-			}
-		}
-
-		rf, rh, err := r.FormFile("file")
+		// 浏览器上传 或 curl -F "file=@xx"
+		// 参考 r.FormFile("file") 的流程,避免生成临时文件
+		mr, err := r.MultipartReader()
 		if err != nil {
 			return err
 		}
-		// 浏览器上传 或 curl -F "file=@xx"
-		// r.FormFile 会先把文件下载好,下面只是复制,因此进度条已客户端为准
-		fr, size = rf, rh.Size
-		path = filepath.Join(path, rh.Filename)
+
+		np, err := mr.NextPart()
+		if err != nil {
+			return err
+		}
+
+		fn := np.FileName()
+		if fn == "" || np.FormName() != "file" {
+			return http.ErrMissingFile
+		}
+
+		fr, path = np, filepath.Join(path, fn)
+
+		size, err = parseInt64(r.Header.Get(headerLength))
+		if err != nil {
+			return err
+		}
 	}
 	//goland:noinspection GoUnhandledErrorResult
 	defer fr.Close()

@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 )
@@ -37,11 +36,6 @@ const (
 var icoData []byte // 嵌入图标文件
 
 func createRegFile(exe, addr string) error {
-	//goland:noinspection GoBoolExpressions
-	if runtime.GOOS != "windows" {
-		return nil // 仅window下才生成右键快捷键
-	}
-
 	fw, err := os.Create("addRightClickRegistry.reg")
 	if err != nil {
 		return err
